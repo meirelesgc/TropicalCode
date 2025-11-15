@@ -1,44 +1,84 @@
 import asyncio
 
 import streamlit as st
+from streamlit_cookies_manager import EncryptedCookieManager
 
 from tropicalcode.database import get_session
-from tropicalcode.repositorios.estacionamento_repo import get_estacionamentos
-from tropicalcode.repositorios.registro_atividade_repo import create_registro
+from tropicalcode.repositorios.estacionamento_repo import find_best_for_user
+from tropicalcode.repositorios.registro_atividade_repo import (
+    create_registro,
+    usuario_tem_entrada_ativa,
+)
+from tropicalcode.repositorios.usuario_repo import get_usuario_por_nome
 
-st.title("Entrada de Veículos")
+cookies = EncryptedCookieManager(prefix="app_", password="senha_muito_secreta")
+
+if not cookies.ready():
+    st.stop()
+
+query = st.query_params
+chave = query.get("chave", [""])
 
 
-async def obter_livre():
+if not chave.isdigit() or len(chave) != 4:
+    st.error("Acesso negado. Parâmetro 'chave' inválido.")
+    st.stop()
+
+if "user" not in cookies or cookies.get("user") == "":
+    st.error("Nenhum usuário logado")
+    st.stop()
+
+username = cookies.get("user")
+
+st.title("Área Restrita")
+
+
+async def fluxo():
     async for session in get_session():
-        ests = await get_estacionamentos(session)
-    for e in ests:
-        if e.tipo_vaga is not None:
-            return e
-    return None
+        usuario = await get_usuario_por_nome(session, username)
+        if not usuario:
+            return {"error": "Usuário não encontrado"}
 
+        if await usuario_tem_entrada_ativa(session, usuario.id):
+            return {
+                "error": "Você já possui uma entrada ativa e só pode usar uma vaga por vez."
+            }
 
-async def registrar(e):
-    async for session in get_session():
-        await create_registro(
+        estacionamento = await find_best_for_user(session, usuario)
+        if not estacionamento:
+            return {"error": "Nenhum estacionamento disponível"}
+
+        registro = await create_registro(
             session,
             {
-                "estacionamento_id": e.id,
+                "estacionamento_id": estacionamento.id,
+                "usuario_id": usuario.id,
                 "tipo": "ENTRADA",
-                "caminho": "entrada",
+                "caminho": f"/entrada?chave={chave}",
             },
         )
-    st.success(f"Entrada registrada para a vaga {e.codigo_vaga}")
+
+        return {
+            "estacionamento": estacionamento,
+            "registro": registro,
+        }
 
 
-async def main():
-    vaga = await obter_livre()
-    if not vaga:
-        st.error("Nenhuma vaga disponível")
-        return
-    st.write(f"Vaga disponível: {vaga.codigo_vaga}")
-    if st.button("Registrar Entrada"):
-        await registrar(vaga)
+result = st.session_state.get("entrada_result")
 
+if result is None:
+    result = asyncio.run(fluxo())
+    st.session_state["entrada_result"] = result
 
-asyncio.run(main())
+if "error" in result:
+    st.error(result["error"])
+    st.stop()
+
+e = result["estacionamento"]
+r = result["registro"]
+
+st.success(f"Usuário logado: {username}")
+st.info(f"Vaga recomendada: {e.codigo_vaga} (ID {e.id})")
+st.write(f"Tipo: {e.tipo_vaga}")
+st.write(f"Posição geral: {e.posicao_geral}")
+st.write(f"Registro criado (ID {r.id}) às {r.horario}")

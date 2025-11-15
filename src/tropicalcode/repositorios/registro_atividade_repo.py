@@ -47,3 +47,19 @@ async def delete_registro(session: AsyncSession, registro_id: int):
     await session.delete(registro)
     await session.commit()
     return True
+
+
+async def usuario_tem_entrada_ativa(session: AsyncSession, usuario_id: int):
+    result = await session.execute(select(RegistroAtividade))
+    registros = result.scalars().all()
+
+    latest = None
+    for r in registros:
+        if r.usuario_id == usuario_id:
+            if latest is None or r.horario > latest.horario:
+                latest = r
+
+    if latest and latest.tipo == "ENTRADA":
+        return True
+
+    return False

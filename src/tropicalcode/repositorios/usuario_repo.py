@@ -1,7 +1,14 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tropicalcode.models import Usuario
+from tropicalcode.models import RegistroAtividade, Usuario
+
+
+async def get_usuario_por_nome(session: AsyncSession, nome: str):
+    result = await session.execute(
+        select(Usuario).where(Usuario.nome_usuario == nome)
+    )
+    return result.scalar_one_or_none()
 
 
 async def create_usuario(session: AsyncSession, data: dict):
@@ -42,3 +49,19 @@ async def delete_usuario(session: AsyncSession, usuario_id: int):
     await session.delete(usuario)
     await session.commit()
     return True
+
+
+async def usuario_tem_entrada_ativa(session: AsyncSession, usuario_id: int):
+    result = await session.execute(select(RegistroAtividade))
+    registros = result.scalars().all()
+
+    latest = None
+    for r in registros:
+        if r.usuario_id == usuario_id:
+            if latest is None or r.horario > latest.horario:
+                latest = r
+
+    if latest and latest.tipo == "ENTRADA":
+        return True
+
+    return False

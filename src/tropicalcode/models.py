@@ -54,6 +54,7 @@ class RegistroAtividade:
     estacionamento_id: Mapped[int] = mapped_column(
         ForeignKey("estacionamentos.id")
     )
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"))
     tipo: Mapped[Enum] = mapped_column(
         Enum("ENTRADA", "SAIDA", name="tipo_movimento")
     )
