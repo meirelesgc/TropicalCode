@@ -60,3 +60,17 @@ class RegistroAtividade:
     )
     horario: Mapped[datetime] = mapped_column(server_default=func.now())
     caminho: Mapped[str]
+
+
+@mapped_as_dataclass(table_registry)
+class Caminho:
+    __tablename__ = "caminhos"
+
+    id: Mapped[int] = mapped_column(init=False, primary_key=True)
+    origem_x: Mapped[int]
+    origem_y: Mapped[int]
+    destino_x: Mapped[int]
+    destino_y: Mapped[int]
+    direcao: Mapped[Enum] = mapped_column(
+        Enum("IDA", "VOLTA", "AMBOS", name="direcao_caminho")
+    )

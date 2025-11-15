@@ -64,14 +64,21 @@ async def get_available_estacionamentos(session):
     return [e for e in estacionamentos if e.id not in ocupados]
 
 
-async def find_best_for_user(session, usuario):
+async def find_best_for_user(session, usuario, tipo_veiculo_selecionado: str):
     disponiveis = await get_available_estacionamentos(session)
 
     if not disponiveis:
         return None
 
+    vagas_compativeis = [
+        e for e in disponiveis if e.tipo_vaga == tipo_veiculo_selecionado
+    ]
+
+    if not vagas_compativeis:
+        return None
+
     if usuario.local_trabalho:
-        for e in disponiveis:
+        for e in vagas_compativeis:
             if e.id == usuario.local_trabalho:
                 return e
 
@@ -84,8 +91,8 @@ async def find_best_for_user(session, usuario):
 
         if alvo:
             return min(
-                disponiveis,
+                vagas_compativeis,
                 key=lambda x: abs(x.posicao_geral - alvo.posicao_geral),
             )
 
-    return min(disponiveis, key=lambda x: x.posicao_geral)
+    return min(vagas_compativeis, key=lambda x: x.posicao_geral)

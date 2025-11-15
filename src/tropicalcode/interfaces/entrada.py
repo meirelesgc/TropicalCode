@@ -1,9 +1,11 @@
 import asyncio
 
 import streamlit as st
+from sqlalchemy import select
 from streamlit_cookies_manager import EncryptedCookieManager
 
 from tropicalcode.database import get_session
+from tropicalcode.models import Automovel
 from tropicalcode.repositorios.estacionamento_repo import find_best_for_user
 from tropicalcode.repositorios.registro_atividade_repo import (
     create_registro,
@@ -30,23 +32,24 @@ if "user" not in cookies or cookies.get("user") == "":
 
 username = cookies.get("user")
 
-st.title("Área Restrita")
+st.title("Área Restrita - Registrar Entrada")
+st.success(f"Usuário logado: {username}")
 
 
-async def fluxo():
+async def registrar_entrada(usuario, automovel_selecionado):
+
     async for session in get_session():
-        usuario = await get_usuario_por_nome(session, username)
-        if not usuario:
-            return {"error": "Usuário não encontrado"}
-
         if await usuario_tem_entrada_ativa(session, usuario.id):
-            return {
-                "error": "Você já possui uma entrada ativa e só pode usar uma vaga por vez."
-            }
+            return {"error": "Você já possui uma entrada ativa."}
 
-        estacionamento = await find_best_for_user(session, usuario)
+        estacionamento = await find_best_for_user(
+            session, usuario, automovel_selecionado.tipo
+        )
+
         if not estacionamento:
-            return {"error": "Nenhum estacionamento disponível"}
+            return {
+                "error": f"Nenhuma vaga do tipo '{automovel_selecionado.tipo}' está disponível no momento."
+            }
 
         registro = await create_registro(
             session,
@@ -64,21 +67,78 @@ async def fluxo():
         }
 
 
-result = st.session_state.get("entrada_result")
+async def setup_ui_selecao():
 
-if result is None:
-    result = asyncio.run(fluxo())
-    st.session_state["entrada_result"] = result
+    async for session in get_session():
+        usuario = await get_usuario_por_nome(session, username)
+        if not usuario:
+            st.error("Usuário não encontrado")
+            st.stop()
 
-if "error" in result:
-    st.error(result["error"])
-    st.stop()
+        if await usuario_tem_entrada_ativa(session, usuario.id):
+            st.warning(
+                "Você já possui uma entrada ativa e só pode usar uma vaga por vez."
+            )
+            st.stop()
 
-e = result["estacionamento"]
-r = result["registro"]
+        automoveis_result = await session.execute(
+            select(Automovel).where(Automovel.usuario_id == usuario.id)
+        )
+        automoveis_usuario = automoveis_result.scalars().all()
 
-st.success(f"Usuário logado: {username}")
-st.info(f"Vaga recomendada: {e.codigo_vaga} (ID {e.id})")
-st.write(f"Tipo: {e.tipo_vaga}")
-st.write(f"Posição geral: {e.posicao_geral}")
-st.write(f"Registro criado (ID {r.id}) às {r.horario}")
+        if not automoveis_usuario:
+            st.error(
+                "Você não possui veículos cadastrados. "
+                "Por favor, cadastre um veículo antes de registrar uma entrada."
+            )
+            st.stop()
+
+        opcoes_carros = {
+            f"{auto.placa} ({auto.tipo})": auto for auto in automoveis_usuario
+        }
+
+        st.markdown("---")
+        st.subheader("Selecione seu veículo")
+
+        selecao_formatada = st.selectbox(
+            "Qual veículo você está usando hoje?", options=opcoes_carros.keys()
+        )
+
+        if not selecao_formatada:
+            st.stop()
+
+        automovel_escolhido = opcoes_carros[selecao_formatada]
+
+        st.markdown("---")
+
+        if st.button("Confirmar Entrada e Receber Vaga"):
+            if "entrada_result" in st.session_state:
+                del st.session_state["entrada_result"]
+
+            result = await registrar_entrada(usuario, automovel_escolhido)
+            st.session_state["entrada_result"] = result
+            st.rerun()
+
+
+if "entrada_result" in st.session_state:
+    result = st.session_state["entrada_result"]
+
+    if "error" in result:
+        st.error(result["error"])
+    else:
+        e = result["estacionamento"]
+        r = result["registro"]
+
+        st.balloons()
+        st.success(f"Entrada registrada com sucesso! (ID {r.id})")
+        st.info(f"Vaga recomendada: {e.codigo_vaga} (ID {e.id})")
+        st.write(f"Tipo da Vaga: {e.tipo_vaga}")
+        st.write(f"Posição geral: {e.posicao_geral}")
+        st.write(f"Horário: {r.horario.strftime('%d/%m/%Y às %H:%M:%S')}")
+
+    if st.button("Voltar"):
+        del st.session_state["entrada_result"]
+        st.rerun()
+
+else:
+    asyncio.run(setup_ui_selecao())
