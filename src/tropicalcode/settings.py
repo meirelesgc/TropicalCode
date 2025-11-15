@@ -8,3 +8,4 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str
     URL_ENTRADA: str
+    URL_SAIDA: str

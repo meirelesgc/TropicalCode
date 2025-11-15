@@ -17,7 +17,7 @@ if not cookies.ready():
     st.stop()
 
 query = st.query_params
-chave = query.get("chave", [""])
+chave = query.get("chave", "")
 
 
 if not chave.isdigit() or len(chave) != 4:
