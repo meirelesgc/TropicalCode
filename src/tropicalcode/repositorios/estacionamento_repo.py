@@ -3,7 +3,13 @@ import heapq
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tropicalcode.models import Caminho, Estacionamento, RegistroAtividade
+from tropicalcode.models import (
+    Caminho,
+    Estacionamento,
+    RegistroAtividade,
+    Usuario,
+)
+from tropicalcode.repositorios.trabalho_repo import get_local_trabalho
 
 ORIGEM_X = 0
 ORIGEM_Y = 0
@@ -69,7 +75,7 @@ async def get_available_estacionamentos(session):
     return [e for e in estacionamentos if e.id not in ocupados]
 
 
-async def build_graph(session, vagas=[]):
+async def build_graph(session, vagas=[], local_trabalho=None):
     result = await session.execute(select(Caminho))
     caminhos = result.scalars().all()
     graph = {}
@@ -89,7 +95,6 @@ async def build_graph(session, vagas=[]):
                 graph[current] = []
 
             next_node = None
-
             if current[0] < d[0]:
                 next_node = (current[0] + 1, current[1])
             elif current[0] > d[0]:
@@ -113,22 +118,31 @@ async def build_graph(session, vagas=[]):
 
             current = next_node
 
-    for vaga in vagas:
-        vaga_pos = (vaga.posicao_x, vaga.posicao_y)
-        if vaga_pos not in graph:
-            graph[vaga_pos] = []
+    # 2. Cria uma lista de "nós especiais" (vagas + local de trabalho)
+    nodes_to_connect = []
+    for v in vagas:
+        nodes_to_connect.append((v.posicao_x, v.posicao_y))
+
+    if local_trabalho:
+        nodes_to_connect.append((
+            local_trabalho.posicao_x,
+            local_trabalho.posicao_y,
+        ))
+
+    # 3. Conecta os "nós especiais" ao grafo principal
+    for pos in nodes_to_connect:
+        if pos not in graph:
+            graph[pos] = []
 
         for node in graph:
-            if node != vaga_pos:
-                if node[0] == vaga_pos[0] or node[1] == vaga_pos[1]:
-                    if (
-                        abs(node[0] - vaga_pos[0]) + abs(node[1] - vaga_pos[1])
-                        <= 1.5
-                    ):
-                        if vaga_pos not in graph[node]:
-                            graph[node].append(vaga_pos)
-                        if node not in graph[vaga_pos]:
-                            graph[vaga_pos].append(node)
+            if node != pos:
+                # Sua lógica original de conexão
+                if node[0] == pos[0] or node[1] == pos[1]:
+                    if abs(node[0] - pos[0]) + abs(node[1] - pos[1]) <= 1.5:
+                        if pos not in graph[node]:
+                            graph[node].append(pos)
+                        if node not in graph[pos]:
+                            graph[pos].append(node)
 
     return graph
 
@@ -155,11 +169,13 @@ async def calcular_distancia(session, vaga):
 
     if origem not in graph or destino not in graph:
         return float("inf")
-
+    print("ENTREI AQUi")
     return dijkstra(graph, origem, destino)
 
 
-async def find_best_for_user(session, usuario, tipo_veiculo_selecionado: str):
+async def find_best_for_user(
+    session, usuario: Usuario, tipo_veiculo_selecionado: str
+):
     disponiveis = await get_available_estacionamentos(session)
 
     if not disponiveis:
@@ -171,8 +187,10 @@ async def find_best_for_user(session, usuario, tipo_veiculo_selecionado: str):
 
     if not vagas_compativeis:
         return None
-
-    graph = await build_graph(session, vagas=vagas_compativeis)
+    local_trabalho = await get_local_trabalho(session, usuario.local_trabalho)
+    graph = await build_graph(
+        session, vagas=vagas_compativeis, local_trabalho=local_trabalho
+    )
     origem = (ORIGEM_X, ORIGEM_Y)
 
     if origem not in graph:
