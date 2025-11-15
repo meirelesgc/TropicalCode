@@ -8,6 +8,10 @@ from tropicalcode.repositorios.automovel_repo import (
     create_automovel,
     get_automoveis,
 )
+from tropicalcode.repositorios.trabalho_repo import (
+    create_local_trabalho,
+    get_locais_trabalho,
+)
 from tropicalcode.repositorios.usuario_repo import create_usuario, get_usuarios
 
 cookies = EncryptedCookieManager(prefix="app_", password="senha_muito_secreta")
@@ -15,11 +19,14 @@ cookies = EncryptedCookieManager(prefix="app_", password="senha_muito_secreta")
 if not cookies.ready():
     st.stop()
 
+MAP_SIZE = 10
+
 menu_options = [
     "Criar Conta",
     "Login",
     "Listar Usuários",
     "Registrar Automóvel",
+    "Criar Local de Trabalho",
 ]
 
 params = st.query_params
@@ -41,8 +48,21 @@ async def criar_conta():
     nome = st.text_input("Nome de usuário")
     senha = st.text_input("Senha", type="password")
     email = st.text_input("Email")
-    local = st.text_input("Local de trabalho")
+
+    async for session in get_session():
+        locais = await get_locais_trabalho(session)
+    local_map = {l.nome: l.id for l in locais}
+    local_nome = st.selectbox(
+        "Local de trabalho", ["Selecione"] + list(local_map.keys())
+    )
+
     if st.button("Criar"):
+        if local_nome == "Selecione":
+            st.error("Selecione um local de trabalho válido")
+            return
+
+        local_id = local_map[local_nome]
+
         async for session in get_session():
             await create_usuario(
                 session,
@@ -50,7 +70,7 @@ async def criar_conta():
                     "nome_usuario": nome,
                     "senha": senha,
                     "email": email,
-                    "local_trabalho": local,
+                    "local_trabalho": local_id,
                 },
             )
         st.success("Usuário criado")
@@ -136,6 +156,66 @@ async def registrar_automovel():
         st.write(f"ID: {a.id} | Placa: {a.placa} | Tipo: {a.tipo}")
 
 
+async def criar_local():
+    st.title("Criar Local de Trabalho no Mapa")
+
+    if "local_nome" not in st.session_state:
+        st.session_state.local_nome = ""
+    if "local_pos" not in st.session_state:
+        st.session_state.local_pos = None
+
+    # --- INÍCIO DA MUDANÇA ---
+
+    # 1. Use `value` para ler o estado e remova `key`.
+    # 2. Salve o retorno do widget de volta no estado.
+    nome_input = st.text_input(
+        "Nome do Local de Trabalho",
+        value=st.session_state.local_nome,  # Use `value`
+        placeholder="Digite o nome do local",
+    )
+    st.session_state.local_nome = nome_input  # Atualize o estado manualmente
+
+    # --- FIM DA MUDANÇA ---
+
+    st.subheader("Selecione a posição no mapa")
+    cols = st.columns(MAP_SIZE)
+    for y in range(MAP_SIZE):
+        for x in range(MAP_SIZE):
+            label = f"{x},{y}"
+            is_selected = st.session_state.local_pos == (x, y)
+            btn_type = "primary" if is_selected else "secondary"
+            btn = cols[x].button(label, key=f"local-{x}-{y}", type=btn_type)
+            if btn:
+                st.session_state.local_pos = (x, y)
+                st.rerun()
+
+    if st.button("Criar Local"):
+        if not st.session_state.local_nome:
+            st.error("Informe o nome do local")
+            return
+        if st.session_state.local_pos is None:
+            st.error("Selecione uma posição no mapa")
+            return
+
+        x, y = st.session_state.local_pos
+        async for session in get_session():
+            await create_local_trabalho(
+                session,
+                {
+                    "nome": st.session_state.local_nome,
+                    "posicao_x": x,
+                    "posicao_y": y,
+                },
+            )
+        st.success(
+            f"Local '{st.session_state.local_nome}' criado em ({x},{y})"
+        )
+
+        st.session_state.local_nome = ""
+        st.session_state.local_pos = None
+        st.rerun()
+
+
 if menu == "Criar Conta":
     asyncio.run(criar_conta())
 elif menu == "Login":
@@ -144,3 +224,5 @@ elif menu == "Listar Usuários":
     asyncio.run(listar())
 elif menu == "Registrar Automóvel":
     asyncio.run(registrar_automovel())
+elif menu == "Criar Local de Trabalho":
+    asyncio.run(criar_local())

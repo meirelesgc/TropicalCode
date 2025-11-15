@@ -3,6 +3,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from tropicalcode.models import Estacionamento, RegistroAtividade
 
+ORIGEM_X = 0
+ORIGEM_Y = 0
+
 
 async def create_estacionamento(session: AsyncSession, data: dict):
     est = Estacionamento(**data)
@@ -64,6 +67,55 @@ async def get_available_estacionamentos(session):
     return [e for e in estacionamentos if e.id not in ocupados]
 
 
+async def build_graph(session):
+    result = await session.execute(select(Caminho))
+    caminhos = result.scalars().all()
+    graph = {}
+    for c in caminhos:
+        o = (c.origem_x, c.origem_y)
+        d = (c.destino_x, c.destino_y)
+        if o not in graph:
+            graph[o] = []
+        if d not in graph:
+            graph[d] = []
+        if c.direcao in ("IDA", "AMBOS"):
+            graph[o].append(d)
+        if c.direcao in ("VOLTA", "AMBOS"):
+            graph[d].append(o)
+    return graph
+
+
+def dijkstra(graph, start, target):
+    import heapq
+
+    queue = [(0, start)]
+    visited = set()
+    while queue:
+        dist, node = heapq.heappop(queue)
+        if node == target:
+            return dist
+        if node in visited:
+            continue
+        visited.add(node)
+        for neigh in graph.get(node, []):
+            heapq.heappush(queue, (dist + 1, neigh))
+    return float("inf")
+
+
+async def calcular_distancia(session, vaga):
+    graph = await build_graph(session)
+    origem = (ORIGEM_X, ORIGEM_Y)
+    destino = (vaga.posicao_x, vaga.posicao_y)
+    return dijkstra(graph, origem, destino)
+
+
+async def calcular_distancia_trabalho(session, alvo, vaga):
+    graph = await build_graph(session)
+    origem = (alvo.posicao_x, alvo.posicao_y)
+    destino = (vaga.posicao_x, vaga.posicao_y)
+    return dijkstra(graph, origem, destino)
+
+
 async def find_best_for_user(session, usuario, tipo_veiculo_selecionado: str):
     disponiveis = await get_available_estacionamentos(session)
 
@@ -78,21 +130,27 @@ async def find_best_for_user(session, usuario, tipo_veiculo_selecionado: str):
         return None
 
     if usuario.local_trabalho:
-        for e in vagas_compativeis:
-            if e.id == usuario.local_trabalho:
-                return e
-
         result = await session.execute(
             select(Estacionamento).where(
                 Estacionamento.id == usuario.local_trabalho
             )
         )
         alvo = result.scalar_one_or_none()
-
         if alvo:
-            return min(
-                vagas_compativeis,
-                key=lambda x: abs(x.posicao_geral - alvo.posicao_geral),
-            )
+            menor = None
+            menor_dist = float("inf")
+            for v in vagas_compativeis:
+                d = await calcular_distancia_trabalho(session, alvo, v)
+                if d < menor_dist:
+                    menor = v
+                    menor_dist = d
+            return menor
 
-    return min(vagas_compativeis, key=lambda x: x.posicao_geral)
+    menor = None
+    menor_dist = float("inf")
+    for v in vagas_compativeis:
+        d = await calcular_distancia(session, v)
+        if d < menor_dist:
+            menor = v
+            menor_dist = d
+    return menor

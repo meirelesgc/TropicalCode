@@ -1,7 +1,7 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tropicalcode.models import RegistroAtividade, Usuario
+from tropicalcode.models import LocalTrabalho, RegistroAtividade, Usuario
 
 
 async def get_usuario_por_nome(session: AsyncSession, nome: str):
@@ -52,16 +52,32 @@ async def delete_usuario(session: AsyncSession, usuario_id: int):
 
 
 async def usuario_tem_entrada_ativa(session: AsyncSession, usuario_id: int):
-    result = await session.execute(select(RegistroAtividade))
+    result = await session.execute(
+        select(RegistroAtividade).where(
+            RegistroAtividade.usuario_id == usuario_id
+        )
+    )
     registros = result.scalars().all()
 
-    latest = None
-    for r in registros:
-        if r.usuario_id == usuario_id:
-            if latest is None or r.horario > latest.horario:
-                latest = r
+    if not registros:
+        return False
 
-    if latest and latest.tipo == "ENTRADA":
-        return True
+    latest = max(registros, key=lambda r: r.horario)
+    return latest.tipo == "ENTRADA"
 
-    return False
+
+async def get_usuario_com_local(session: AsyncSession, usuario_id: int):
+    result = await session.execute(
+        select(Usuario, LocalTrabalho)
+        .join(
+            LocalTrabalho,
+            Usuario.local_trabalho == LocalTrabalho.id,
+            isouter=True,
+        )
+        .where(Usuario.id == usuario_id)
+    )
+    row = result.first()
+    if row:
+        usuario, local = row
+        return {"usuario": usuario, "local_trabalho": local}
+    return None

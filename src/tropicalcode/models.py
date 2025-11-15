@@ -14,7 +14,10 @@ class Usuario:
     nome_usuario: Mapped[str] = mapped_column(unique=True)
     senha: Mapped[str]
     email: Mapped[str] = mapped_column(unique=True)
-    local_trabalho: Mapped[int | None]
+    local_trabalho: Mapped[int | None] = mapped_column(
+        ForeignKey("locais_trabalho.id")
+    )
+
     criado_em: Mapped[datetime] = mapped_column(
         init=False, server_default=func.now()
     )
@@ -74,3 +77,13 @@ class Caminho:
     direcao: Mapped[Enum] = mapped_column(
         Enum("IDA", "VOLTA", "AMBOS", name="direcao_caminho")
     )
+
+
+@mapped_as_dataclass(table_registry)
+class LocalTrabalho:
+    __tablename__ = "locais_trabalho"
+
+    id: Mapped[int] = mapped_column(init=False, primary_key=True)
+    nome: Mapped[str] = mapped_column(unique=True)
+    posicao_x: Mapped[float]
+    posicao_y: Mapped[float]
