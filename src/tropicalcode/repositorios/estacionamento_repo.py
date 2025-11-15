@@ -1,7 +1,9 @@
+import heapq
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tropicalcode.models import Estacionamento, RegistroAtividade
+from tropicalcode.models import Caminho, Estacionamento, RegistroAtividade
 
 ORIGEM_X = 0
 ORIGEM_Y = 0
@@ -67,27 +69,71 @@ async def get_available_estacionamentos(session):
     return [e for e in estacionamentos if e.id not in ocupados]
 
 
-async def build_graph(session):
+async def build_graph(session, vagas=[]):
     result = await session.execute(select(Caminho))
     caminhos = result.scalars().all()
     graph = {}
+
     for c in caminhos:
         o = (c.origem_x, c.origem_y)
         d = (c.destino_x, c.destino_y)
+
         if o not in graph:
             graph[o] = []
         if d not in graph:
             graph[d] = []
-        if c.direcao in ("IDA", "AMBOS"):
-            graph[o].append(d)
-        if c.direcao in ("VOLTA", "AMBOS"):
-            graph[d].append(o)
+
+        current = o
+        while current != d:
+            if current not in graph:
+                graph[current] = []
+
+            next_node = None
+
+            if current[0] < d[0]:
+                next_node = (current[0] + 1, current[1])
+            elif current[0] > d[0]:
+                next_node = (current[0] - 1, current[1])
+            elif current[1] < d[1]:
+                next_node = (current[0], current[1] + 1)
+            elif current[1] > d[1]:
+                next_node = (current[0], current[1] - 1)
+            else:
+                break
+
+            if next_node not in graph:
+                graph[next_node] = []
+
+            if c.direcao in ("IDA", "AMBOS"):
+                if next_node not in graph[current]:
+                    graph[current].append(next_node)
+            if c.direcao in ("VOLTA", "AMBOS"):
+                if current not in graph[next_node]:
+                    graph[next_node].append(current)
+
+            current = next_node
+
+    for vaga in vagas:
+        vaga_pos = (vaga.posicao_x, vaga.posicao_y)
+        if vaga_pos not in graph:
+            graph[vaga_pos] = []
+
+        for node in graph:
+            if node != vaga_pos:
+                if node[0] == vaga_pos[0] or node[1] == vaga_pos[1]:
+                    if (
+                        abs(node[0] - vaga_pos[0]) + abs(node[1] - vaga_pos[1])
+                        <= 1.5
+                    ):
+                        if vaga_pos not in graph[node]:
+                            graph[node].append(vaga_pos)
+                        if node not in graph[vaga_pos]:
+                            graph[vaga_pos].append(node)
+
     return graph
 
 
 def dijkstra(graph, start, target):
-    import heapq
-
     queue = [(0, start)]
     visited = set()
     while queue:
@@ -103,16 +149,13 @@ def dijkstra(graph, start, target):
 
 
 async def calcular_distancia(session, vaga):
-    graph = await build_graph(session)
+    graph = await build_graph(session, vagas=[vaga])
     origem = (ORIGEM_X, ORIGEM_Y)
     destino = (vaga.posicao_x, vaga.posicao_y)
-    return dijkstra(graph, origem, destino)
 
+    if origem not in graph or destino not in graph:
+        return float("inf")
 
-async def calcular_distancia_trabalho(session, alvo, vaga):
-    graph = await build_graph(session)
-    origem = (alvo.posicao_x, alvo.posicao_y)
-    destino = (vaga.posicao_x, vaga.posicao_y)
     return dijkstra(graph, origem, destino)
 
 
@@ -129,28 +172,25 @@ async def find_best_for_user(session, usuario, tipo_veiculo_selecionado: str):
     if not vagas_compativeis:
         return None
 
-    if usuario.local_trabalho:
-        result = await session.execute(
-            select(Estacionamento).where(
-                Estacionamento.id == usuario.local_trabalho
-            )
-        )
-        alvo = result.scalar_one_or_none()
-        if alvo:
-            menor = None
-            menor_dist = float("inf")
-            for v in vagas_compativeis:
-                d = await calcular_distancia_trabalho(session, alvo, v)
-                if d < menor_dist:
-                    menor = v
-                    menor_dist = d
-            return menor
+    graph = await build_graph(session, vagas=vagas_compativeis)
+    origem = (ORIGEM_X, ORIGEM_Y)
+
+    if origem not in graph:
+        return None
 
     menor = None
     menor_dist = float("inf")
+
     for v in vagas_compativeis:
-        d = await calcular_distancia(session, v)
+        destino = (v.posicao_x, v.posicao_y)
+
+        if destino not in graph:
+            continue
+
+        d = dijkstra(graph, origem, destino)
+
         if d < menor_dist:
             menor = v
             menor_dist = d
+
     return menor

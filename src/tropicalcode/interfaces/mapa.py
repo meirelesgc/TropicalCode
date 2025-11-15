@@ -9,8 +9,6 @@ from tropicalcode.models import Caminho
 
 MAP_SIZE = 10
 
-# --- FUNÇÕES DE BANCO DE DADOS (Sem alteração) ---
-
 
 def normalizar_caminho(p1, p2):
     if p1 == p2:
