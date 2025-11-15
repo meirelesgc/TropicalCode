@@ -1,10 +1,16 @@
+from datetime import datetime, timezone
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from tropicalcode.models.registro_atividade import RegistroAtividade
+
+from tropicalcode.models import RegistroAtividade
 
 
 async def create_registro(session: AsyncSession, data: dict):
-    registro = RegistroAtividade(**data)
+    registro = RegistroAtividade(
+        **data,
+        horario=datetime.now(timezone.utc),
+    )
     session.add(registro)
     await session.commit()
     await session.refresh(registro)

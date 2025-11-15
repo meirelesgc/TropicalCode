@@ -1,6 +1,7 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from tropicalcode.models.automovel import Automovel
+
+from tropicalcode.models import Automovel
 
 
 async def create_automovel(session: AsyncSession, data: dict):

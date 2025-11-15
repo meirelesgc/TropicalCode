@@ -1,6 +1,7 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from tropicalcode.models.estacionamento import Estacionamento
+
+from tropicalcode.models import Estacionamento
 
 
 async def create_estacionamento(session: AsyncSession, data: dict):
